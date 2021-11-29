@@ -1,0 +1,30 @@
+n_classes: 10
+latent_size: 100
+image_size: 1024
+negative_slope: 0.2
+label_embed_size: 10
+
+discriminator_first_hidden_size: 128
+discriminator_second_hidden_size: 256
+discriminator_third_hidden_size: 512
+discriminator_dropout: 0.4
+
+generator_first_hidden_size: 128
+generator_second_hidden_size: 256
+generator_third_hidden_size: 512
+
+generator_linear_hidden_size: 128
+generator_conv1: [128, 512, 4, 1, 0]
+generator_conv2: [512, 256, 4, 2, 1]
+generator_conv3: [256, 128, 4, 2, 1]
+generator_conv4: [128, 64, 4, 2, 1]
+generator_conv5: [64, 1, 3, 1, 1]
+
+discriminator_linear1: 256
+discriminator_linear2: 64
+
+discriminator_conv1: [1, 32, 4, 2, 1]
+discriminator_conv2: [32, 64, 4, 2, 1]
+discriminator_conv3: [64, 128, 4, 2, 1]
+discriminator_conv4: [128, 256, 4, 2, 1]
+discriminator_conv5: [256, 512, 3, 1, 1]
