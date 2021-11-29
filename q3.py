@@ -71,14 +71,13 @@ def generate_images(generator, config, N=60000):
 
     ones = torch.ones(N // 10)
 
-    # z = torch.randn(N, config.latent_size).to(device)
-    # fake_y = torch.cat([ones * 0, ones * 1, ones * 2, ones * 3, ones * 4,
-    # ones * 5, ones * 6, ones * 7, ones * 8, ones * 9], dim=0).long().to(device)
-    z = torch.randn(1, config.latent_size).to(device)
-    fake_y = torch.tensor(3 * torch.ones(1)).long().to(device)
-    print(fake_y)
+    z = torch.randn(N, config.latent_size).to(device)
+    fake_y = torch.cat([ones * 0, ones * 1, ones * 2, ones * 3, ones * 4,
+                        ones * 5, ones * 6, ones * 7, ones * 8, ones * 9], dim=0).long().to(device)
+    # z = torch.randn(1, config.latent_size).to(device)
+    # fake_y = torch.tensor(3 * torch.ones(1)).long().to(device)
+    # print(fake_y)
     fake_images = generator(z, fake_y)
-
     fake_images = np.squeeze(fake_images, axis=1)
     # print(np.shape(fake_images))
     # (N, 28, 28)
@@ -122,21 +121,21 @@ if __name__ == '__main__':
 
     generator = conv_generator.to()
     generator.load_state_dict(torch.load(
-        'weights/500/G_500.ckpt'))
+        'weights/200/G_200.ckpt'))
 
     fake_images = generate_images(generator, tconf)
 
-    classifier = Classifier()
-    classifier.load_stat_dict(torch.load(
-        'weights/500/G_500.ckpt'))
-        
-    """Confidence value"""
-    conf, _ = classify(classifier, images)
-    fake_conf, fake_labels = classify(classifier, fake_images)
-
-    """Mix the Dataset"""
-    real_ratio = 0.1  # [0.1, 0.2, 0.5, 1.0]
-    dataset = make_dataset(images, labels, conf, fake_images, fake_labels, fake_conf, real_ratio)
+    # classifier = Classifier()
+    # classifier.load_stat_dict(torch.load(
+    #     '.ckpt'))
+    #
+    # """Confidence value"""
+    # conf, _ = classify(classifier, images)
+    # fake_conf, fake_labels = classify(classifier, fake_images)
+    #
+    # """Mix the Dataset"""
+    # real_ratio = 0.1  # [0.1, 0.2, 0.5, 1.0]
+    # dataset = make_dataset(images, labels, conf, fake_images, fake_labels, fake_conf, real_ratio)
 
     """Training"""
 
