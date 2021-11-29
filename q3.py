@@ -14,11 +14,16 @@ import numpy as np
 import torch
 import yaml
 from torchvision.utils import save_image
+import torchvision.datasets
+from torchvision import transforms
 
 from dataset import SimpleDataset
 from model import ModelConfig, ConvolutionGenerator, LinearGenerator
 from trainer import TrainConfig
 from utils import set_seed
+from classifier.model import CNNClassifier
+from small_classifier.TestCNN import ConvNet
+from torch.utils.data import DataLoader
 
 
 def denormalize(images):
@@ -63,35 +68,41 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
 """# Generate Images """
 
 
-def generate_images(generator, config, N=60000):
+def generate_images(generator, config, n=60000):
     device = torch.device('cpu')
     if torch.cuda.is_available():
         device = torch.cuda.current_device()
-        generator = torch.nn.DataParallel(generator.to(device))
+        # generator = torch.nn.DataParallel(generator.to(device))
+    generator = generator.to(device)
 
-    ones = torch.ones(N // 10)
+    ones = torch.ones(n // 10)
 
-    z = torch.randn(N, config.latent_size).to(device)
+    z = torch.randn(n, config.latent_size).to(device)
     fake_y = torch.cat([ones * 0, ones * 1, ones * 2, ones * 3, ones * 4,
                         ones * 5, ones * 6, ones * 7, ones * 8, ones * 9], dim=0).long().to(device)
-    # z = torch.randn(1, config.latent_size).to(device)
-    # fake_y = torch.tensor(3 * torch.ones(1)).long().to(device)
-    # print(fake_y)
     fake_images = generator(z, fake_y)
     fake_images = np.squeeze(fake_images, axis=1)
-    # print(np.shape(fake_images))
-    # (N, 28, 28)
     save_image(denormalize(fake_images[0, :, :]),
                os.path.join("figure", "fake_image_test_.png"))
 
-    return fake_images
+    return fake_images, fake_y
 
 
 """# Get Confidence"""
 
 
-def classify(classifier, images):
-    conf = np.array([])
+def classify(model, images, n=60000):
+    # device = torch.device('cpu')
+    # if torch.cuda.is_available():
+    #     device = torch.cuda.current_device()
+
+    # model = model.to(device)
+    # images = images.to(device)
+
+    model.eval()
+    with torch.no_grad():
+        conf = model(images)
+    labels = torch.argmax(conf, 1)
 
     return conf, labels
 
@@ -113,29 +124,62 @@ if __name__ == '__main__':
     images = np.load(f'data/{tyaml["dataset"]}_images.npy')
     labels = np.load(f'data/{tyaml["dataset"]}_labels.npy')
 
+    transforms = transforms.Compose([
+        transforms.Resize(32),
+        transforms.ToTensor()
+    ])
+    mnist_train = torchvision.datasets.MNIST(root='data/',
+                                             train=True,
+                                             transform=transforms,
+                                             download=True)
+
+    mnist_test = torchvision.datasets.MNIST(root='data/',
+                                            train=False,
+                                            transform=transforms,
+                                            download=True)
+
+    train_loader = DataLoader(dataset=mnist_train,
+                              batch_size=512,
+                              shuffle=True,
+                              num_workers=6,
+                              drop_last=True)
+
+    test_loader = DataLoader(dataset=mnist_test,
+                             batch_size=2048,
+                             shuffle=False,
+                             num_workers=6,
+                             drop_last=False)
+
+    # for (x, y) in train_loader:
+    #     x, y = x.cuda(0), y.cuda(0)
+
     """Generate images"""
     myaml = yaml.load(open('config/model.yaml', 'r'), Loader=yaml.FullLoader)
     mconf = ModelConfig(myaml)
     linear_generator = LinearGenerator(mconf)
     conv_generator = ConvolutionGenerator(mconf)
 
-    generator = conv_generator.to()
+    generator = conv_generator
     generator.load_state_dict(torch.load(
         'weights/200/G_200.ckpt'))
 
-    fake_images = generate_images(generator, tconf)
+    fake_images, fake_y = generate_images(generator, tconf, 10000)
 
-    # classifier = Classifier()
-    # classifier.load_stat_dict(torch.load(
-    #     '.ckpt'))
-    #
-    # """Confidence value"""
-    # conf, _ = classify(classifier, images)
-    # fake_conf, fake_labels = classify(classifier, fake_images)
-    #
-    # """Mix the Dataset"""
-    # real_ratio = 0.1  # [0.1, 0.2, 0.5, 1.0]
-    # dataset = make_dataset(images, labels, conf, fake_images, fake_labels, fake_conf, real_ratio)
+    classifier = CNNClassifier()
+    classifier.load_state_dict(torch.load(
+        'classifier/checkpoints/best.pt'))
+
+    # classifier = ConvNet()
+    # classifier.load_state_dict(torch.load(
+    #     'small_classifier/testModel.ckpt'))
+
+    """Confidence value"""
+    fake_conf, fake_labels = classify(classifier, fake_images, 10000)
+    conf, predicted_labels = classify(classifier, images)
+
+    """Mix the Dataset"""
+    real_ratio = 0.1  # [0.1, 0.2, 0.5, 1.0]
+    dataset = make_dataset(images, labels, conf, fake_images, fake_labels, fake_conf, real_ratio)
 
     """Training"""
 
