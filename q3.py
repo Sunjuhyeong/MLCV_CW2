@@ -12,19 +12,20 @@ import os
 
 import numpy as np
 import torch
+import torch.nn as nn
 import yaml
 from torchvision.utils import save_image
 import torchvision.datasets
 from torchvision import transforms
 
-from dataset import SimpleDataset
+from dataset import NewSimpleDataset
 from model import ModelConfig, ConvolutionGenerator, LinearGenerator
 from trainer import TrainConfig
 from utils import set_seed
 from classifier.model import CNNClassifier
+from classifier.main import training
 from small_classifier.TestCNN import ConvNet
 from torch.utils.data import DataLoader
-
 
 def denormalize(images):
     out = (images + 1) / 2
@@ -39,28 +40,36 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     # labels: (60000, 1)
     # conf:   (60000, 1)
 
-    N = np.shape(labels)[0]
+    N = labels.size(0)
+    fake_N = fake_labels.size(0)
+
+    # """Shuffle the fake dataset"""
+    indices = torch.randperm(fake_N)
+    fake_labels = fake_labels[indices]
+    fake_conf = fake_conf[indices]
+    fake_images = fake_images[indices]
 
     """Combine the 2 Dataset"""
-    idx = np.random.choice(N, real_ratio * N, replace=False)
-    fake_idx = np.random.choice(N, (1 - real_ratio) * N, replace=False)
-    image_data = images[idx, :, :]
-    label_data = labels[idx, :]
-    conf = conf[idx, :]
-    fake_imageData = fake_images[fake_idx, :, :]
-    fake_labelData = fake_labels[fake_idx, :]
-    fake_conf = fake_conf[fake_idx, :]
-    new_images = np.concatenate((image_data, fake_imageData), axis=0)
-    new_labels = np.concatenate((label_data, fake_labelData), axis=0)
-    new_confs = np.concatenate((conf, fake_conf), axis=0)
+    # idx = np.random.choice(N, real_ratio * N, replace=False)
+    # fake_idx = np.random.choice(N, (1 - real_ratio) * N, replace=False)
+    idx = int(real_ratio * N)
+    fake_idx = int((1 - real_ratio) * idx)
+    image_data = images[:idx, :, :]
+    label_data = labels[:idx]
+    conf = conf[:idx]
+    fake_imageData = fake_images[:fake_idx, :, :]
+    fake_labelData = fake_labels[:fake_idx]
+    fake_conf = fake_conf[:fake_idx]
+    new_images = torch.cat((image_data, fake_imageData), dim=0)
+    new_labels = torch.cat((label_data, fake_labelData), dim=0)
+    new_confs = torch.cat((conf, fake_conf), dim=0)
 
     """Sort by confidence"""
-    n = np.argsort(-new_confs, axis=0)
-    n = np.squeeze(n, axis=-1)
+    n = torch.argsort(-new_confs)
     new_images = new_images[n, :, :]
-    new_labels = new_labels[n, :]
-
-    dataset = SimpleDataset(new_images, new_labels)
+    new_labels = new_labels[n]
+    new_images = torch.unsqueeze(new_images, dim=1)
+    dataset = NewSimpleDataset(new_images, new_labels)
 
     return dataset
 
@@ -98,11 +107,56 @@ def classify(model, images, n=60000):
 
     # model = model.to(device)
     # images = images.to(device)
+    images = images.unsqueeze(dim=1)
+    batch_size = 512
+    num_class = 10
+    conf = torch.zeros(n, num_class)
+    labels = torch.zeros(n)
+    max = (n // batch_size) + 1
+    soft_max = nn.Softmax(dim=1)
 
     model.eval()
     with torch.no_grad():
-        conf = model(images)
-    labels = torch.argmax(conf, 1)
+        for i in range(max):
+            if i == max - 1:
+                temp_conf = soft_max(model(images[batch_size * i:, :, :, :]))
+                conf[batch_size * i:, :] = temp_conf
+                labels[batch_size * i:] = torch.argmax(temp_conf, 1)
+                break
+            else:
+                temp_conf = soft_max(model(images[batch_size * i:batch_size * (i + 1), :, :, :]))
+                conf[batch_size * i:batch_size * (i + 1), :] = temp_conf
+                labels[batch_size * i:batch_size * (i + 1)] = torch.argmax(temp_conf, 1)
+
+    return conf, labels
+
+
+def classify_with_dataloader(model, data_loader, n=60000):
+    # device = torch.device('cpu')
+    # if torch.cuda.is_available():
+    #     device = torch.cuda.current_device()
+
+    # model = model.to(device)
+    # images = images.to(device)
+    batch_size = 512
+    num_class = 10
+
+    init = True
+    soft_max = nn.Softmax(dim=1)
+
+    model.eval()
+    for (x, y) in data_loader:
+        # x, y = x.cuda(0), y.cuda(0)
+
+        with torch.no_grad():
+            temp = soft_max(model(x))
+            if init:
+                conf = temp
+                labels = torch.argmax(temp, 1)
+                init = False
+            else:
+                conf = torch.cat((conf, temp), dim=0)
+                labels = torch.cat((labels, torch.argmax(temp, 1)), dim=0)
 
     return conf, labels
 
@@ -124,23 +178,23 @@ if __name__ == '__main__':
     images = np.load(f'data/{tyaml["dataset"]}_images.npy')
     labels = np.load(f'data/{tyaml["dataset"]}_labels.npy')
 
-    transforms = transforms.Compose([
+    transf = transforms.Compose([
         transforms.Resize(32),
         transforms.ToTensor()
     ])
     mnist_train = torchvision.datasets.MNIST(root='data/',
                                              train=True,
-                                             transform=transforms,
+                                             transform=transf,
                                              download=True)
 
     mnist_test = torchvision.datasets.MNIST(root='data/',
                                             train=False,
-                                            transform=transforms,
+                                            transform=transf,
                                             download=True)
 
     train_loader = DataLoader(dataset=mnist_train,
                               batch_size=512,
-                              shuffle=True,
+                              shuffle=False,
                               num_workers=6,
                               drop_last=True)
 
@@ -160,56 +214,51 @@ if __name__ == '__main__':
     conv_generator = ConvolutionGenerator(mconf)
 
     generator = conv_generator
-    generator.load_state_dict(torch.load(
-        'weights/200/G_200.ckpt'))
+    # generator.load_state_dict(torch.load(
+    #     'weights/200/G_200.ckpt'))
 
-    fake_images, fake_y = generate_images(generator, tconf, 10000)
+    generator.load_state_dict(torch.load(
+        'weights/200/G_200.ckpt', map_location=torch.device('cpu')))
+
+    fake_images, fake_y = generate_images(generator, tconf, 2000)
+    # fake_images, fake_y = torch.zeros((2000, 32, 32)), torch.zeros((2000))
 
     classifier = CNNClassifier()
+    # classifier.load_state_dict(torch.load(
+    #     'classifier/checkpoints/best.pt'))
+
     classifier.load_state_dict(torch.load(
-        'classifier/checkpoints/best.pt'))
+        'classifier/checkpoints/best.pt', map_location=torch.device('cpu')))
 
     # classifier = ConvNet()
     # classifier.load_state_dict(torch.load(
     #     'small_classifier/testModel.ckpt'))
 
-    """Confidence value"""
-    fake_conf, fake_labels = classify(classifier, fake_images, 10000)
-    conf, predicted_labels = classify(classifier, images)
-
+    """Get Confidence value"""
+    fake_conf, fake_labels = classify(classifier, fake_images, 2000)
+    wrong_indices = (fake_labels != fake_y).nonzero()
+    fake_conf[wrong_indices] = torch.zeros((1, 10))
+    print("wrong labels: ", wrong_indices)
+    # conf, predicted_labels = classify_with_dataloader(classifier, train_loader, n=60000)
+    conf = torch.zeros((60000, 10))
     """Mix the Dataset"""
-    real_ratio = 0.1  # [0.1, 0.2, 0.5, 1.0]
-    dataset = make_dataset(images, labels, conf, fake_images, fake_labels, fake_conf, real_ratio)
+    real_ratio = 0.98  # [0.1, 0.2, 0.5, 1.0]
+    hello = torch.max(fake_conf, dim=1).values
+    hello2 = torch.max(conf, dim=1).values
+    wrong_indices = (torch.max(fake_conf, dim=1).values < 1.0).nonzero()
+    print("wrong labels: ", wrong_indices)
+    images_for_dataset = transforms.Resize(32)(mnist_train.data)
+    dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images, fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
 
-    """Training"""
+    new_train_loader = DataLoader(dataset=dataset,
+                                  batch_size=512,
+                                  shuffle=False,
+                                  num_workers=6
+                                  # drop_last=True
+                                  )
+
+    """Training Classifier """
+    training(new_train_loader, test_loader)
+
 
     """Evaluation"""
-
-"""# SandBox"""
-#
-# images = np.load(root + '/data/mnist_images.npy')
-# labels = np.load(root + '/data/mnist_labels.npy')
-# print(np.shape(images))
-# print(np.shape(labels))
-# # labels[:20]
-# # images[1]
-# # for i in range(np.shape(labels)[0]):
-# # labels==i
-# collections.Counter(labels[:30000])
-#
-# images = np.random.rand(3, 2, 2)
-# conf = np.random.rand(3, 1)
-# n = np.argsort(-conf, axis=0)
-# print(np.shape(n))
-# n = np.squeeze(n, axis=-1)
-# # rearrange(n, 'A B C -> A B', A=2, B=2, C=1)
-# # print(conf)
-# # new_images = images[:,n,:,:]
-# print(n)
-# print("images", images)
-# # for i in range(np.shape(images)[0]):
-# # images[i] = images[i, n[i], :, :]
-# images = images[n]
-# print("images", images)
-# # print("new_images",new_images)
-# print(np.shape(images))
