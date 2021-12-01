@@ -3,15 +3,23 @@ import torch.nn as nn
 import torchvision.datasets
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from classifier.model import CNNClassifier
 
 from tqdm import trange
 
 
-def training(train_loader, test_loader):
+def training(train_dataset, test_loader):
     model = CNNClassifier()
     model = model.cuda(0)
+
+    train_loader = DataLoader(dataset=train_dataset,
+                              batch_size=512,
+                              shuffle=False,
+                              num_workers=6,
+                              drop_last=True
+                              )
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
@@ -20,7 +28,9 @@ def training(train_loader, test_loader):
     for epoch in trange(200):
 
         model.train()
-        for (x, y) in train_loader:
+        x, y = None, None
+        pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+        for (x, y) in pbar:
             x, y = x.cuda(0), y.cuda(0)
 
             optimizer.zero_grad()

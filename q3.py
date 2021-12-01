@@ -243,7 +243,6 @@ if __name__ == '__main__':
     fake_conf[wrong_indices] = torch.zeros((1, 10), device=device)
     print("wrong labels: ", wrong_indices)
     conf, predicted_labels = classify(classifier, images_for_dataset, n=60000)
-    # conf = torch.zeros((60000, 10))
 
     """Mix the Dataset"""
     real_ratio = 0.98  # [0.1, 0.2, 0.5, 1.0]
@@ -253,14 +252,7 @@ if __name__ == '__main__':
     print("wrong labels: ", wrong_indices)
     dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images, fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
 
-    new_train_loader = DataLoader(dataset=dataset,
-                                  batch_size=512,
-                                  shuffle=False,
-                                  num_workers=6
-                                  # drop_last=True
-                                  )
-
     """Training Classifier """
-    training(new_train_loader, test_loader)
+    training(dataset, test_loader)
 
     """Evaluation"""
