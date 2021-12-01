@@ -11,7 +11,7 @@ from tqdm import trange
 
 def training(train_loader, test_loader):
     model = CNNClassifier()
-    # model = model.cuda(0)
+    model = model.cuda(0)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
@@ -21,7 +21,7 @@ def training(train_loader, test_loader):
 
         model.train()
         for (x, y) in train_loader:
-            # x, y = x.cuda(0), y.cuda(0)
+            x, y = x.cuda(0), y.cuda(0)
 
             optimizer.zero_grad()
             logits = model(x)
@@ -32,7 +32,7 @@ def training(train_loader, test_loader):
         correct = 0
         model.eval()
         for (x, y) in test_loader:
-            # x, y = x.cuda(0), y.cuda(0)
+            x, y = x.cuda(0), y.cuda(0)
 
             with torch.no_grad():
                 logits = model(x)
@@ -104,5 +104,5 @@ if __name__ == '__main__':
         accuracy = correct / len(mnist_test)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'checkpoints/best.pt')
+            torch.save(model.state_dict(), f'checkpoints_test/best.pt')
             print(f'[Epoch : {epoch}/200] Best Accuracy : {accuracy:.6f}%')
