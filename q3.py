@@ -221,8 +221,8 @@ if __name__ == '__main__':
         'weights/200/G_200.ckpt'))
     # generator.load_state_dict(torch.load(
     #     'weights/200/G_200.ckpt', map_location=torch.device('cpu')))
-
-    fake_images, fake_y = generate_images(generator, tconf, 2000)
+    num_fake_images = 5000
+    fake_images, fake_y = generate_images(generator, tconf, num_fake_images)
     # fake_images, fake_y = torch.zeros((2000, 32, 32)), torch.zeros((2000))
 
     classifier = CNNClassifier()
@@ -238,7 +238,7 @@ if __name__ == '__main__':
     images_for_dataset = transforms.Resize(32)(mnist_train.data)
 
     """Get Confidence value"""
-    fake_conf, fake_labels = classify(classifier, fake_images, 2000)
+    fake_conf, fake_labels = classify(classifier, fake_images, num_fake_images)
     wrong_indices = (fake_labels != fake_y).nonzero()
     fake_conf[wrong_indices] = torch.zeros((1, 10), device=device)
     print("wrong labels: ", wrong_indices)
