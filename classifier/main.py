@@ -15,9 +15,8 @@ def training(train_dataset, test_loader):
     model = model.cuda(0)
 
     train_loader = DataLoader(dataset=train_dataset,
-                              batch_size=512,
+                              batch_size=8,
                               shuffle=False,
-                              num_workers=6,
                               drop_last=True
                               )
 
@@ -25,17 +24,17 @@ def training(train_dataset, test_loader):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
     best_accuracy = 0.
-    for epoch in trange(200):
+    for epoch in trange(75):
 
         model.train()
         x, y = None, None
         pbar = tqdm(enumerate(train_loader), total=len(train_loader))
-        for (x, y) in pbar:
+        for step, (x, y) in pbar:
             x, y = x.cuda(0), y.cuda(0)
 
             optimizer.zero_grad()
             logits = model(x)
-            loss = criterion(logits, y)
+            loss = criterion(logits, y.to(torch.int64))
             loss.backward()
             optimizer.step()
 
@@ -48,10 +47,10 @@ def training(train_dataset, test_loader):
                 logits = model(x)
                 correct += (torch.argmax(logits, 1) == y).sum()
 
-        accuracy = correct / len(mnist_test)
+        accuracy = correct / len(train_dataset)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'new_checkpoints/best.pt')
+            torch.save(model.state_dict(), f'new_checkpoints/best_1.0.pt')
             print(f'[Epoch : {epoch}/200] Best Accuracy : {accuracy:.6f}%')
 
 

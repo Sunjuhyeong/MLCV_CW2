@@ -24,8 +24,9 @@ from trainer import TrainConfig
 from utils import set_seed
 from classifier.model import CNNClassifier
 from classifier.main import training
-from small_classifier.TestCNN import ConvNet
 from torch.utils.data import DataLoader
+from argparse import ArgumentParser
+
 
 def denormalize(images):
     out = (images + 1) / 2
@@ -58,11 +59,23 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     idx = int(real_ratio * N)
     fake_idx = int((1 - real_ratio) * idx)
     image_data = images[:idx, :, :].to(device)
+    image_data = torch.unsqueeze(image_data, dim=1)
     label_data = labels[:idx].to(device)
     conf = conf[:idx].to(device)
+    _, counts =  torch.unique(label_data, sorted=True, return_counts=True)
+    print("counts", counts)
+    save_image(denormalize(image_data[0:5, :, :, :]),
+               os.path.join("figure", "real_image_train_.png"))
+
     fake_imageData = fake_images[:fake_idx, :, :].to(device)
+    fake_imageData = torch.unsqueeze(fake_imageData, dim=1)
     fake_labelData = fake_labels[:fake_idx].to(device)
     fake_conf = fake_conf[:fake_idx].to(device)
+    _, fake_counts = torch.unique(fake_labelData, sorted=True, return_counts=True)
+    print("counts", fake_counts)
+    # save_image(denormalize(fake_imageData[0:5, :, :, :]),
+    #            os.path.join("figure", "fake_image_train_.png"))
+
     new_images = torch.cat((image_data, fake_imageData), dim=0)
     new_labels = torch.cat((label_data, fake_labelData), dim=0)
     new_confs = torch.cat((conf, fake_conf), dim=0)
@@ -71,9 +84,11 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     n = torch.argsort(-new_confs).to(device)
     new_images = new_images[n, :, :]
     new_labels = new_labels[n]
-    new_images = torch.unsqueeze(new_images, dim=1)
+    # new_images = torch.unsqueeze(new_images, dim=1)
     dataset = NewSimpleDataset(new_images, new_labels)
-
+    save_image(denormalize(new_images[N-50:N, :, :, :]),
+               os.path.join("figure", "new_image_train_.png"))
+    print(new_labels[N-50:N])
     return dataset
 
 
@@ -88,14 +103,19 @@ def generate_images(generator, config, n=60000):
     generator = generator.to(device)
 
     ones = torch.ones(n // 10)
+    ones = ones.long()
+    ones = ones.to(device)
+    fake_images = torch.Tensor()
+    for i in range(10):
 
-    z = torch.randn(n, config.latent_size).to(device)
+        z = torch.randn(n//10, config.latent_size).to(device)
+        # fake_y = torch.tensor(, device=device).long()
+        with torch.no_grad():
+            fake_images=fake_images.to(device)
+            fake_images = torch.cat([fake_images, generator(z, ones*i)], dim=0)
+    fake_images = torch.squeeze(fake_images, dim=1)
     fake_y = torch.cat([ones * 0, ones * 1, ones * 2, ones * 3, ones * 4,
                         ones * 5, ones * 6, ones * 7, ones * 8, ones * 9], dim=0).long().to(device)
-    fake_images = generator(z, fake_y)
-    fake_images = np.squeeze(fake_images, axis=1)
-    save_image(denormalize(fake_images[0, :, :]),
-               os.path.join("figure", "fake_image_test_.png"))
 
     return fake_images, fake_y
 
@@ -103,7 +123,7 @@ def generate_images(generator, config, n=60000):
 """# Get Confidence"""
 
 
-def classify(model, images, n=60000):
+def classify(model, images):
     device = torch.device('cpu')
     if torch.cuda.is_available():
         device = torch.cuda.current_device()
@@ -112,20 +132,24 @@ def classify(model, images, n=60000):
     images = images.type(torch.FloatTensor)
     images = images.to(device)
     images = images.unsqueeze(dim=1)
-    batch_size = 512
+    n = images.size(0)
+    batch_size = 8
     num_class = 10
     conf = torch.zeros(n, num_class)
     labels = torch.zeros(n)
-    max = (n // batch_size) + 1
+    max = (n // batch_size)
+    if n % batch_size != 0:
+        max += 1
+
     soft_max = nn.Softmax(dim=1).to(device)
 
     model.eval()
     with torch.no_grad():
         for i in range(max):
             if i == max - 1:
-                temp_conf = soft_max(model(images[batch_size * i:, :, :, :]))
-                conf[batch_size * i:, :] = temp_conf
-                labels[batch_size * i:] = torch.argmax(temp_conf, 1)
+                temp_conf = soft_max(model(images[batch_size * i:n, :, :, :]))
+                conf[batch_size * i:n, :] = temp_conf
+                labels[batch_size * i:n] = torch.argmax(temp_conf, 1)
                 break
             else:
                 temp_conf = soft_max(model(images[batch_size * i:batch_size * (i + 1), :, :, :]))
@@ -134,32 +158,32 @@ def classify(model, images, n=60000):
 
     return conf.to(device), labels.to(device)
 
-
-def classify_with_dataloader(model, data_loader, n=60000):
-    device = torch.device('cpu')
-    if torch.cuda.is_available():
-        device = torch.cuda.current_device()
-
-    model = model.to(device)
-
-    init = True
-    soft_max = nn.Softmax(dim=1).to(device)
-
-    model.eval()
-    for (x, y) in data_loader:
-        x, y = x.cuda(0), y.cuda(0)
-
-        with torch.no_grad():
-            temp = soft_max(model(x))
-            if init:
-                conf = temp
-                labels = torch.argmax(temp, 1)
-                init = False
-            else:
-                conf = torch.cat((conf, temp), dim=0)
-                labels = torch.cat((labels, torch.argmax(temp, 1)), dim=0)
-
-    return conf.to(device), labels.to(device)
+#
+# def classify_with_dataloader(model, data_loader, n=60000):
+#     device = torch.device('cpu')
+#     if torch.cuda.is_available():
+#         device = torch.cuda.current_device()
+#
+#     model = model.to(device)
+#
+#     init = True
+#     soft_max = nn.Softmax(dim=1).to(device)
+#
+#     model.eval()
+#     for (x, y) in data_loader:
+#         x, y = x.cuda(0), y.cuda(0)
+#
+#         with torch.no_grad():
+#             temp = soft_max(model(x))
+#             if init:
+#                 conf = temp
+#                 labels = torch.argmax(temp, 1)
+#                 init = False
+#             else:
+#                 conf = torch.cat((conf, temp), dim=0)
+#                 labels = torch.cat((labels, torch.argmax(temp, 1)), dim=0)
+#
+#     return conf.to(device), labels.to(device)
 
 
 """# Main"""
@@ -172,7 +196,15 @@ logging.basicConfig(
 
 if __name__ == '__main__':
     set_seed(42)
+    parser = ArgumentParser()
+    parser.add_argument("--vis", dest="vis", action="store_true", help="Visualize images")
+    parser.add_argument("--batch_size", default=50, type=int, help="Number of best eigen choices")
+    parser.add_argument("--device", default=torch.device('cpu'), type=int, help="Number of best eigen choices")
+    if torch.cuda.is_available():
+        parser.set_defaults(device=torch.cuda.current_device())
+    parser.set_defaults(vis=False)
 
+    args = parser.parse_args()
     device = torch.device('cpu')
     if torch.cuda.is_available():
         device = torch.cuda.current_device()
@@ -198,17 +230,14 @@ if __name__ == '__main__':
                                             download=True)
 
     train_loader = DataLoader(dataset=mnist_train,
-                              batch_size=512,
+                              batch_size=8,
                               shuffle=False,
-                              num_workers=6,
                               drop_last=True)
 
     test_loader = DataLoader(dataset=mnist_test,
-                             batch_size=2048,
+                             batch_size=8,
                              shuffle=False,
-                             num_workers=6,
                              drop_last=False)
-
 
     """Generate images"""
     myaml = yaml.load(open('config/model.yaml', 'r'), Loader=yaml.FullLoader)
@@ -221,9 +250,10 @@ if __name__ == '__main__':
         'weights/200/G_200.ckpt'))
     # generator.load_state_dict(torch.load(
     #     'weights/200/G_200.ckpt', map_location=torch.device('cpu')))
-    num_fake_images = 5000
+    num_fake_images = 60000
     fake_images, fake_y = generate_images(generator, tconf, num_fake_images)
     # fake_images, fake_y = torch.zeros((2000, 32, 32)), torch.zeros((2000))
+    fake_images = denormalize(fake_images)
 
     classifier = CNNClassifier()
     classifier.load_state_dict(torch.load(
@@ -232,27 +262,69 @@ if __name__ == '__main__':
     # classifier.load_state_dict(torch.load(
     #     'classifier/checkpoints/best.pt', map_location=torch.device('cpu')))
 
-    # classifier = ConvNet()
-    # classifier.load_state_dict(torch.load(
-    #     'small_classifier/testModel.ckpt'))
     images_for_dataset = transforms.Resize(32)(mnist_train.data)
 
     """Get Confidence value"""
-    fake_conf, fake_labels = classify(classifier, fake_images, num_fake_images)
+    fake_conf, fake_labels = classify(classifier, fake_images)
     wrong_indices = (fake_labels != fake_y).nonzero()
-    fake_conf[wrong_indices] = torch.zeros((1, 10), device=device)
-    print("wrong labels: ", wrong_indices)
-    conf, predicted_labels = classify(classifier, images_for_dataset, n=60000)
+    wrong_conf = torch.max(fake_conf[wrong_indices], dim=1)
+    right_indices = (fake_labels == fake_y).nonzero()
+    right_indices = torch.squeeze(right_indices, dim=1)
+    fake_conf = fake_conf[right_indices, :]
+    fake_images = fake_images[right_indices, :, :]
+    fake_labels = fake_labels[right_indices]
+    print(f"{wrong_indices.size()} wrong labels: ", wrong_indices)
 
+    conf, predicted_labels = classify(classifier, images_for_dataset)
+    fake_conf = fake_conf.to(torch.float)
+    conf = conf.to(torch.float)
     """Mix the Dataset"""
-    real_ratio = 0.98  # [0.1, 0.2, 0.5, 1.0]
-    hello = torch.max(fake_conf, dim=1).values
-    hello2 = torch.max(conf, dim=1).values
-    wrong_indices = (torch.max(fake_conf, dim=1).values < 1.0).nonzero()
-    print("wrong labels: ", wrong_indices)
-    dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images, fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
+    real_ratio = 1.0  # [0.1, 0.2, 0.5, 1.0]
+    # hello = torch.max(fake_conf, dim=1).values
+    # hello2 = torch.max(conf, dim=1).values
+    # hard_indices = (1.0 > hello).nonzero()
+    # hard_index = (0.0 < hello[hard_indices]).nonzero()
+    # zero_indices = (hello == 0).nonzero()
+    # print("hard examples labels: ", hard_index)
+    # print(hello[hard_index])
+    # print(hello[zero_indices])
+    # print(torch.max(hello[hard_index]), torch.min(hello[hard_index]), torch.mean(hello[hard_index], dim=0))
 
+    dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+                           fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
+
+    new_train_loader = DataLoader(dataset=dataset,
+                                  batch_size=8,
+                                  shuffle=False,
+                                  drop_last=True
+                                  )
     """Training Classifier """
     training(dataset, test_loader)
 
     """Evaluation"""
+    model = CNNClassifier()
+    model.load_state_dict(torch.load(
+        'new_checkpoints/best.pt'))
+    correct = 0
+    model.to(device)
+    model.eval()
+    for (x, y) in test_loader:
+        x, y = x.cuda(0), y.cuda(0)
+
+        with torch.no_grad():
+            logits = model(x)
+            correct += (torch.argmax(logits, 1) == y).sum()
+    accuracy = correct / len(dataset)
+    print(f' Best Accuracy : {accuracy:.6f}%')
+
+    correct = 0
+    for (x, y) in new_train_loader:
+        x, y = x.cuda(0), y.cuda(0)
+
+        with torch.no_grad():
+            logits = model(x)
+            correct += (torch.argmax(logits, 1) == y).sum()
+
+    accuracy = correct / len(dataset)
+    print(f' Best Accuracy : {accuracy:.6f}%')
+
