@@ -81,7 +81,10 @@ def classifier_training(train, test, new):
             else:
                 x, y = images[batch_size * i:batch_size * (i+1), :, :, :].clone().detach(), label[batch_size * i:batch_size * (i+1)].clone().detach()
             x.cuda(0), y.cuda(0)
-
+            print("max", torch.max(x))
+            # save_image(x,
+            #            os.path.join("figure", "new_image_train_.png"))
+            # print("label:", y)
             optimizer.zero_grad()
             model = model.to(device)
             x, y = x.to(device), y.to(device)
@@ -94,7 +97,9 @@ def classifier_training(train, test, new):
         model.eval()
         for (x, y) in test_loader:
             x, y = x.cuda(0), y.cuda(0)
-
+            # save_image(x,
+            #            os.path.join("figure", "new_image_train_.png"))
+            # print("label:", y)
             with torch.no_grad():
                 logits = model(x)
                 correct += (torch.argmax(logits, 1) == y).sum()
@@ -213,10 +218,12 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     new_labels = new_labels[n]
     # new_images = torch.unsqueeze(new_images, dim=1)
     new_labels = new_labels.to(torch.int64)
+    indices = torch.randperm(N)
+
     dataset = NewSimpleDataset(new_images, new_labels)
-    save_image(denormalize(new_images[N - 50:N, :, :, :]),
+    save_image(new_images[N//2 - 20:N//2, :, :, :],
                os.path.join("figure", "new_image_train_.png"))
-    print(new_labels[N - 50:N])
+    print(new_labels[N//2 - 20:N//2])
     return dataset
 
 
@@ -320,7 +327,7 @@ if __name__ == '__main__':
                                             train=False,
                                             transform=transf,
                                             download=True)
-    print((mnist_train.data[0] > 0).nonzero())
+    # print((mnist_train.data[0] > 0).nonzero())
     train_loader = DataLoader(dataset=mnist_train,
                               batch_size=8,
                               shuffle=False,
@@ -353,10 +360,15 @@ if __name__ == '__main__':
     # classifier.load_state_dict(torch.load(
     #     'classifier/checkpoints/best.pt', map_location=torch.device('cpu')))
     images_for_dataset = tf.Resize(32)(mnist_train.data)
+    images_for_dataset = torch.div(images_for_dataset, 255)
+    # a = torch.max(mnist_test.data[0])
+    # b = torch.max(images_for_dataset.data[0])
+    # images_for_dataset = images_for_dataset.clone().detach().numpy()
+    # images_for_dataset = tf.ToTensor()(images_for_dataset)
 
-    images_for_dataset = torch.unsqueeze(images_for_dataset, dim=1)
-    newset = NewSimpleDataset(images_for_dataset, mnist_train.targets)
-    classifier_training(mnist_train, mnist_test, newset)
+    # images_for_dataset = torch.unsqueeze(images_for_dataset, dim=1)
+    # newset = NewSimpleDataset(images_for_dataset, mnist_train.targets)
+    # classifier_training(mnist_train, mnist_test, newset)
 
     """Get Confidence value"""
     fake_conf, fake_labels = classify(classifier, fake_images)
@@ -386,14 +398,16 @@ if __name__ == '__main__':
 
     dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
                            fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
-
+    newimages = dataset.images
+    aa = torch.max(mnist_test.data[0])
+    bb = torch.max(newimages[0])
     new_train_loader = DataLoader(dataset=dataset,
                                   batch_size=8,
                                   shuffle=False,
                                   drop_last=True
                                   )
     """Training Classifier """
-    # training(mnist_train, mnist_test)
+    # training(dataset, mnist_test)
     classifier_training(mnist_train, mnist_test, dataset)
 
     """Evaluation"""
