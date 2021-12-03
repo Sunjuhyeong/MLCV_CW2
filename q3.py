@@ -16,16 +16,143 @@ import torch.nn as nn
 import yaml
 from torchvision.utils import save_image
 import torchvision.datasets
-from torchvision import transforms
+from torchvision import transforms as tf
 
 from dataset import NewSimpleDataset
 from model import ModelConfig, ConvolutionGenerator, LinearGenerator
 from trainer import TrainConfig
 from utils import set_seed
 from classifier.model import CNNClassifier
-from classifier.main import training
 from torch.utils.data import DataLoader
-from argparse import ArgumentParser
+from tqdm import trange
+from tqdm import tqdm
+
+
+def classifier_training(train, test, new):
+
+
+    transforms = tf.Compose([
+        tf.Resize(32),
+        tf.ToTensor()
+    ])
+    batch_size = 8
+    mnist_train = torchvision.datasets.MNIST(root='data/',
+                                             train=True,
+                                             transform=transforms,
+                                             download=True)
+
+    mnist_test = torchvision.datasets.MNIST(root='data/',
+                                            train=False,
+                                            transform=transforms,
+                                            download=True)
+
+    train_loader = DataLoader(dataset=new,
+                              batch_size=8,
+                              shuffle=True,
+                              drop_last=True)
+
+    test_loader = DataLoader(dataset=test,
+                             batch_size=8,
+                             shuffle=False,
+                             drop_last=False)
+
+    model = CNNClassifier()
+    model = model.cuda(0)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+    images = new.images
+    label = new.labels
+    n = images.size(0)
+    best_accuracy = 0.
+    for epoch in trange(200):
+
+        model.train()
+        x, y = None, None
+        # pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+        # for step, (x, y) in pbar:
+        max = (n // batch_size)
+        if n % batch_size != 0:
+            max += 1
+        model.eval()
+        for i in range(max):
+            if i == max - 1:
+                x, y = images[batch_size * i:n, :, :, :].clone().detach(), label[batch_size * i:n].clone().detach()
+            else:
+                x, y = images[batch_size * i:batch_size * (i+1), :, :, :].clone().detach(), label[batch_size * i:batch_size * (i+1)].clone().detach()
+            x.cuda(0), y.cuda(0)
+
+            optimizer.zero_grad()
+            model = model.to(device)
+            x, y = x.to(device), y.to(device)
+            logits = model(x)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+
+        correct = 0
+        model.eval()
+        for (x, y) in test_loader:
+            x, y = x.cuda(0), y.cuda(0)
+
+            with torch.no_grad():
+                logits = model(x)
+                correct += (torch.argmax(logits, 1) == y).sum()
+
+        accuracy = correct / len(mnist_test)
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            torch.save(model.state_dict(), f'checkpoints_test/best.pt')
+            print(f'[Epoch : {epoch}/200] Best Accuracy : {accuracy:.6f}%')
+
+
+def training(train_dataset, test_dataset):
+    model = CNNClassifier()
+    model = model.cuda(0)
+
+    test_loader = DataLoader(dataset=test_dataset,
+                             batch_size=8,
+                             shuffle=False,
+                             drop_last=False)
+
+    train_loader = DataLoader(dataset=train_dataset,
+                              batch_size=8,
+                              shuffle=False,
+                              drop_last=True
+                              )
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+
+    best_accuracy = 0.
+    for epoch in trange(75):
+
+        model.train()
+        x, y = None, None
+        pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+        for step, (x, y) in pbar:
+            x, y = x.cuda(0), y.cuda(0)
+
+            optimizer.zero_grad()
+            logits = model(x)
+            loss = criterion(logits, y.to(torch.int64))
+            loss.backward()
+            optimizer.step()
+
+        correct = 0
+        model.eval()
+        for (x, y) in test_loader:
+            x, y = x.cuda(0), y.cuda(0)
+
+            with torch.no_grad():
+                logits = model(x)
+                correct += (torch.argmax(logits, 1) == y).sum()
+
+        accuracy = correct / len(train_dataset)
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            torch.save(model.state_dict(), f'new_checkpoints/best_1.0.pt')
+            print(f'[Epoch : {epoch}/200] Best Accuracy : {accuracy:.6f}%')
 
 
 def denormalize(images):
@@ -62,7 +189,7 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     image_data = torch.unsqueeze(image_data, dim=1)
     label_data = labels[:idx].to(device)
     conf = conf[:idx].to(device)
-    _, counts =  torch.unique(label_data, sorted=True, return_counts=True)
+    _, counts = torch.unique(label_data, sorted=True, return_counts=True)
     print("counts", counts)
     save_image(denormalize(image_data[0:5, :, :, :]),
                os.path.join("figure", "real_image_train_.png"))
@@ -82,13 +209,14 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
 
     """Sort by confidence"""
     n = torch.argsort(-new_confs).to(device)
-    new_images = new_images[n, :, :]
+    new_images = new_images[n, :, :, :]
     new_labels = new_labels[n]
     # new_images = torch.unsqueeze(new_images, dim=1)
+    new_labels = new_labels.to(torch.int64)
     dataset = NewSimpleDataset(new_images, new_labels)
-    save_image(denormalize(new_images[N-50:N, :, :, :]),
+    save_image(denormalize(new_images[N - 50:N, :, :, :]),
                os.path.join("figure", "new_image_train_.png"))
-    print(new_labels[N-50:N])
+    print(new_labels[N - 50:N])
     return dataset
 
 
@@ -107,12 +235,11 @@ def generate_images(generator, config, n=60000):
     ones = ones.to(device)
     fake_images = torch.Tensor()
     for i in range(10):
-
-        z = torch.randn(n//10, config.latent_size).to(device)
+        z = torch.randn(n // 10, config.latent_size).to(device)
         # fake_y = torch.tensor(, device=device).long()
         with torch.no_grad():
-            fake_images=fake_images.to(device)
-            fake_images = torch.cat([fake_images, generator(z, ones*i)], dim=0)
+            fake_images = fake_images.to(device)
+            fake_images = torch.cat([fake_images, generator(z, ones * i)], dim=0)
     fake_images = torch.squeeze(fake_images, dim=1)
     fake_y = torch.cat([ones * 0, ones * 1, ones * 2, ones * 3, ones * 4,
                         ones * 5, ones * 6, ones * 7, ones * 8, ones * 9], dim=0).long().to(device)
@@ -123,12 +250,13 @@ def generate_images(generator, config, n=60000):
 """# Get Confidence"""
 
 
-def classify(model, images):
+def classify(model, input_images):
     device = torch.device('cpu')
     if torch.cuda.is_available():
         device = torch.cuda.current_device()
 
     model = model.to(device)
+    images = input_images.clone().detach()
     images = images.type(torch.FloatTensor)
     images = images.to(device)
     images = images.unsqueeze(dim=1)
@@ -158,33 +286,6 @@ def classify(model, images):
 
     return conf.to(device), labels.to(device)
 
-#
-# def classify_with_dataloader(model, data_loader, n=60000):
-#     device = torch.device('cpu')
-#     if torch.cuda.is_available():
-#         device = torch.cuda.current_device()
-#
-#     model = model.to(device)
-#
-#     init = True
-#     soft_max = nn.Softmax(dim=1).to(device)
-#
-#     model.eval()
-#     for (x, y) in data_loader:
-#         x, y = x.cuda(0), y.cuda(0)
-#
-#         with torch.no_grad():
-#             temp = soft_max(model(x))
-#             if init:
-#                 conf = temp
-#                 labels = torch.argmax(temp, 1)
-#                 init = False
-#             else:
-#                 conf = torch.cat((conf, temp), dim=0)
-#                 labels = torch.cat((labels, torch.argmax(temp, 1)), dim=0)
-#
-#     return conf.to(device), labels.to(device)
-
 
 """# Main"""
 
@@ -196,15 +297,6 @@ logging.basicConfig(
 
 if __name__ == '__main__':
     set_seed(42)
-    parser = ArgumentParser()
-    parser.add_argument("--vis", dest="vis", action="store_true", help="Visualize images")
-    parser.add_argument("--batch_size", default=50, type=int, help="Number of best eigen choices")
-    parser.add_argument("--device", default=torch.device('cpu'), type=int, help="Number of best eigen choices")
-    if torch.cuda.is_available():
-        parser.set_defaults(device=torch.cuda.current_device())
-    parser.set_defaults(vis=False)
-
-    args = parser.parse_args()
     device = torch.device('cpu')
     if torch.cuda.is_available():
         device = torch.cuda.current_device()
@@ -215,9 +307,9 @@ if __name__ == '__main__':
     images = np.load(f'data/{tyaml["dataset"]}_images.npy')
     labels = np.load(f'data/{tyaml["dataset"]}_labels.npy')
 
-    transf = transforms.Compose([
-        transforms.Resize(32),
-        transforms.ToTensor()
+    transf = tf.Compose([
+        tf.Resize(32),
+        tf.ToTensor()
     ])
     mnist_train = torchvision.datasets.MNIST(root='data/',
                                              train=True,
@@ -228,7 +320,7 @@ if __name__ == '__main__':
                                             train=False,
                                             transform=transf,
                                             download=True)
-
+    print((mnist_train.data[0] > 0).nonzero())
     train_loader = DataLoader(dataset=mnist_train,
                               batch_size=8,
                               shuffle=False,
@@ -258,11 +350,13 @@ if __name__ == '__main__':
     classifier = CNNClassifier()
     classifier.load_state_dict(torch.load(
         'classifier/checkpoints/best.pt'))
-
     # classifier.load_state_dict(torch.load(
     #     'classifier/checkpoints/best.pt', map_location=torch.device('cpu')))
+    images_for_dataset = tf.Resize(32)(mnist_train.data)
 
-    images_for_dataset = transforms.Resize(32)(mnist_train.data)
+    images_for_dataset = torch.unsqueeze(images_for_dataset, dim=1)
+    newset = NewSimpleDataset(images_for_dataset, mnist_train.targets)
+    classifier_training(mnist_train, mnist_test, newset)
 
     """Get Confidence value"""
     fake_conf, fake_labels = classify(classifier, fake_images)
@@ -273,7 +367,7 @@ if __name__ == '__main__':
     fake_conf = fake_conf[right_indices, :]
     fake_images = fake_images[right_indices, :, :]
     fake_labels = fake_labels[right_indices]
-    print(f"{wrong_indices.size()} wrong labels: ", wrong_indices)
+    print(f"{wrong_indices.size(0)} wrong labels: ", wrong_indices)
 
     conf, predicted_labels = classify(classifier, images_for_dataset)
     fake_conf = fake_conf.to(torch.float)
@@ -299,7 +393,8 @@ if __name__ == '__main__':
                                   drop_last=True
                                   )
     """Training Classifier """
-    training(dataset, test_loader)
+    # training(mnist_train, mnist_test)
+    classifier_training(mnist_train, mnist_test, dataset)
 
     """Evaluation"""
     model = CNNClassifier()
@@ -327,4 +422,3 @@ if __name__ == '__main__':
 
     accuracy = correct / len(dataset)
     print(f' Best Accuracy : {accuracy:.6f}%')
-
