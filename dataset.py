@@ -27,9 +27,9 @@ class NewSimpleDataset(Dataset):
         self.images = images
         self.labels = labels
 
-        self.transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=0.5, std=0.5)])
+        # self.transforms = transforms.Compose([
+        #     # transforms.ToTensor(),
+        #     transforms.Normalize(mean=0.5, std=0.5)])
 
     def __len__(self):
         return len(self.images)

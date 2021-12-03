@@ -28,7 +28,7 @@ from tqdm import trange
 from tqdm import tqdm
 
 
-def classifier_training(train, test, new):
+def classifier_training(train, test, new, real_ratio):
 
 
     transforms = tf.Compose([
@@ -65,7 +65,7 @@ def classifier_training(train, test, new):
     label = new.labels
     n = images.size(0)
     best_accuracy = 0.
-    for epoch in trange(200):
+    for epoch in trange(100):
 
         model.train()
         x, y = None, None
@@ -81,7 +81,6 @@ def classifier_training(train, test, new):
             else:
                 x, y = images[batch_size * i:batch_size * (i+1), :, :, :].clone().detach(), label[batch_size * i:batch_size * (i+1)].clone().detach()
             x.cuda(0), y.cuda(0)
-            print("max", torch.max(x))
             # save_image(x,
             #            os.path.join("figure", "new_image_train_.png"))
             # print("label:", y)
@@ -107,8 +106,34 @@ def classifier_training(train, test, new):
         accuracy = correct / len(mnist_test)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'checkpoints_test/best.pt')
+            torch.save(model.state_dict(), f'checkpoints_not_sorted/best_{real_ratio}.pt')
             print(f'[Epoch : {epoch}/200] Best Accuracy : {accuracy:.6f}%')
+
+def testing(test, real_ratio):
+    batch_size = 8
+    test_loader = DataLoader(dataset=test,
+                             batch_size=batch_size,
+                             shuffle=False,
+                             drop_last=False)
+
+    model = CNNClassifier()
+    model.load_state_dict(torch.load(
+        f'checkpoints_test/best_{real_ratio}.pt'))
+    model = model.cuda(0)
+
+    correct = 0
+    model.eval()
+    for (x, y) in test_loader:
+        x, y = x.cuda(0), y.cuda(0)
+        # save_image(x,
+        #            os.path.join("figure", "new_image_train_.png"))
+        # print("label:", y)
+        with torch.no_grad():
+            logits = model(x)
+            correct += (torch.argmax(logits, 1) == y).sum()
+
+    accuracy = correct / len(mnist_test)
+    print(f'Accuracy : {accuracy:.6f}%')
 
 
 def training(train_dataset, test_dataset):
@@ -186,10 +211,8 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     fake_images = fake_images[indices]
 
     """Combine the 2 Dataset"""
-    # idx = np.random.choice(N, real_ratio * N, replace=False)
-    # fake_idx = np.random.choice(N, (1 - real_ratio) * N, replace=False)
     idx = int(real_ratio * N)
-    fake_idx = int((1 - real_ratio) * idx)
+    fake_idx = int((1 - real_ratio) * N)
     image_data = images[:idx, :, :].to(device)
     image_data = torch.unsqueeze(image_data, dim=1)
     label_data = labels[:idx].to(device)
@@ -205,8 +228,6 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     fake_conf = fake_conf[:fake_idx].to(device)
     _, fake_counts = torch.unique(fake_labelData, sorted=True, return_counts=True)
     print("counts", fake_counts)
-    # save_image(denormalize(fake_imageData[0:5, :, :, :]),
-    #            os.path.join("figure", "fake_image_train_.png"))
 
     new_images = torch.cat((image_data, fake_imageData), dim=0)
     new_labels = torch.cat((label_data, fake_labelData), dim=0)
@@ -216,9 +237,7 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     n = torch.argsort(-new_confs).to(device)
     new_images = new_images[n, :, :, :]
     new_labels = new_labels[n]
-    # new_images = torch.unsqueeze(new_images, dim=1)
     new_labels = new_labels.to(torch.int64)
-    indices = torch.randperm(N)
 
     dataset = NewSimpleDataset(new_images, new_labels)
     save_image(new_images[N//2 - 20:N//2, :, :, :],
@@ -243,7 +262,6 @@ def generate_images(generator, config, n=60000):
     fake_images = torch.Tensor()
     for i in range(10):
         z = torch.randn(n // 10, config.latent_size).to(device)
-        # fake_y = torch.tensor(, device=device).long()
         with torch.no_grad():
             fake_images = fake_images.to(device)
             fake_images = torch.cat([fake_images, generator(z, ones * i)], dim=0)
@@ -327,7 +345,6 @@ if __name__ == '__main__':
                                             train=False,
                                             transform=transf,
                                             download=True)
-    # print((mnist_train.data[0] > 0).nonzero())
     train_loader = DataLoader(dataset=mnist_train,
                               batch_size=8,
                               shuffle=False,
@@ -351,7 +368,6 @@ if __name__ == '__main__':
     #     'weights/200/G_200.ckpt', map_location=torch.device('cpu')))
     num_fake_images = 60000
     fake_images, fake_y = generate_images(generator, tconf, num_fake_images)
-    # fake_images, fake_y = torch.zeros((2000, 32, 32)), torch.zeros((2000))
     fake_images = denormalize(fake_images)
 
     classifier = CNNClassifier()
@@ -361,14 +377,6 @@ if __name__ == '__main__':
     #     'classifier/checkpoints/best.pt', map_location=torch.device('cpu')))
     images_for_dataset = tf.Resize(32)(mnist_train.data)
     images_for_dataset = torch.div(images_for_dataset, 255)
-    # a = torch.max(mnist_test.data[0])
-    # b = torch.max(images_for_dataset.data[0])
-    # images_for_dataset = images_for_dataset.clone().detach().numpy()
-    # images_for_dataset = tf.ToTensor()(images_for_dataset)
-
-    # images_for_dataset = torch.unsqueeze(images_for_dataset, dim=1)
-    # newset = NewSimpleDataset(images_for_dataset, mnist_train.targets)
-    # classifier_training(mnist_train, mnist_test, newset)
 
     """Get Confidence value"""
     fake_conf, fake_labels = classify(classifier, fake_images)
@@ -385,7 +393,7 @@ if __name__ == '__main__':
     fake_conf = fake_conf.to(torch.float)
     conf = conf.to(torch.float)
     """Mix the Dataset"""
-    real_ratio = 1.0  # [0.1, 0.2, 0.5, 1.0]
+    real_ratio = 0.5  # [0.1, 0.2, 0.5, 1.0]
     # hello = torch.max(fake_conf, dim=1).values
     # hello2 = torch.max(conf, dim=1).values
     # hard_indices = (1.0 > hello).nonzero()
@@ -407,32 +415,7 @@ if __name__ == '__main__':
                                   drop_last=True
                                   )
     """Training Classifier """
-    # training(dataset, mnist_test)
-    classifier_training(mnist_train, mnist_test, dataset)
+    classifier_training(mnist_train, mnist_test, dataset, real_ratio)
 
     """Evaluation"""
-    model = CNNClassifier()
-    model.load_state_dict(torch.load(
-        'new_checkpoints/best.pt'))
-    correct = 0
-    model.to(device)
-    model.eval()
-    for (x, y) in test_loader:
-        x, y = x.cuda(0), y.cuda(0)
-
-        with torch.no_grad():
-            logits = model(x)
-            correct += (torch.argmax(logits, 1) == y).sum()
-    accuracy = correct / len(dataset)
-    print(f' Best Accuracy : {accuracy:.6f}%')
-
-    correct = 0
-    for (x, y) in new_train_loader:
-        x, y = x.cuda(0), y.cuda(0)
-
-        with torch.no_grad():
-            logits = model(x)
-            correct += (torch.argmax(logits, 1) == y).sum()
-
-    accuracy = correct / len(dataset)
-    print(f' Best Accuracy : {accuracy:.6f}%')
+    testing(mnist_test, real_ratio)
