@@ -70,3 +70,94 @@ class CNNClassifier(nn.Module):
         out = self.conv(x)
         out = self.linear(out.view(x.size(0), -1))
         return out
+
+
+class SmallCNN(nn.Module):
+
+    def __init__(self):
+        super(SmallCNN, self).__init__()
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=4, stride=2, padding=1),
+        )
+
+        self.linear = nn.Sequential(
+            nn.Linear(2 * 2 * 128, 256, bias=True),
+            nn.ReLU(),
+            nn.Linear(256, 64, bias=True),
+            nn.ReLU(),
+            nn.Linear(64, 10)
+        )
+
+        self.apply(self.init_weights)
+
+        print(f"number of total parameters for G: {sum(p.numel() for p in self.parameters())}")
+
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform(m.weight)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform(m.weight)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.BatchNorm1d):
+            nn.init.normal_(m.weight, 1.0, 0.02)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.normal_(m.weight, 1.0, 0.02)
+            m.bias.data.zero_()
+
+    def forward(self, x):
+        out = self.conv(x)
+        out = self.linear(out.view(x.size(0), -1))
+        return out
+
+
+class Linear(nn.Module):
+
+    def __init__(self):
+        super(Linear, self).__init__()
+
+        self.linear = nn.Sequential(
+            nn.Linear(32 * 32, 512, bias=True),
+            nn.ReLU(),
+            nn.Linear(512, 64, bias=True),
+            nn.ReLU(),
+            nn.Linear(64, 10)
+        )
+
+        self.apply(self.init_weights)
+
+        print(f"number of total parameters for Linear: {sum(p.numel() for p in self.parameters())}")
+
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform(m.weight)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform(m.weight)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.BatchNorm1d):
+            nn.init.normal_(m.weight, 1.0, 0.02)
+            m.bias.data.zero_()
+
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.normal_(m.weight, 1.0, 0.02)
+            m.bias.data.zero_()
+
+    def forward(self, x):
+        out = self.linear(x.view(x.size(0), -1))
+        return out
