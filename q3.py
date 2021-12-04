@@ -45,8 +45,8 @@ def classifier_training(train, test, new, real_ratio):
                              shuffle=False,
                              drop_last=False)
 
-    # model = Linear()
-    model = CNNClassifier()
+    model = Linear()
+    # model = CNNClassifier()
     model = model.cuda(0)
 
     criterion = nn.CrossEntropyLoss()
@@ -98,7 +98,7 @@ def classifier_training(train, test, new, real_ratio):
         accuracy = correct / len(mnist_test)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'checkpoints_cnn_mixed/best_{real_ratio}.pt')
+            torch.save(model.state_dict(), f'checkpoints_linear_inverse/best_{real_ratio}.pt')
             print(f'[Epoch : {epoch}/100] Best Accuracy : {accuracy:.6f}%')
 
 
@@ -411,13 +411,13 @@ if __name__ == '__main__':
     fake_images = denormalize(fake_images)
 
     """ Classifier """
-    # classifier = Linear()
-    # classifier.load_state_dict(torch.load(
-    #     'classifier/checkpoints/linear_best.pt'))
-    #
-    classifier = CNNClassifier()
+    classifier = Linear()
     classifier.load_state_dict(torch.load(
-        'classifier/checkpoints/best.pt'))
+        'classifier/checkpoints/linear_best.pt'))
+
+    # classifier = CNNClassifier()
+    # classifier.load_state_dict(torch.load(
+    #     'classifier/checkpoints/best.pt'))
 
     images_for_dataset = tf.Resize(32)(mnist_train.data)
     images_for_dataset = torch.div(images_for_dataset, 255)
@@ -451,6 +451,8 @@ if __name__ == '__main__':
     # print(hello[zero_indices])
     # print(torch.max(hello[hard_index]), torch.min(hello[hard_index]), torch.mean(hello[hard_index], dim=0))
     # real_ratio = 1.0
+    print("confidence score: ", torch.mean(torch.max(conf, dim=1).values))
+    print("fake confidence score: ", torch.mean(torch.max(fake_conf, dim=1).values))
 
     for real_ratio in ratio:
         dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
