@@ -28,7 +28,7 @@ from tqdm import trange
 from tqdm import tqdm
 
 
-def classifier_training(train, test, new, real_ratio):
+def classifier_training(train, test, new, real_ratio, dir):
     transforms = tf.Compose([
         tf.Resize(32),
         tf.ToTensor()
@@ -45,8 +45,8 @@ def classifier_training(train, test, new, real_ratio):
                              shuffle=False,
                              drop_last=False)
 
-    model = Linear()
-    # model = CNNClassifier()
+    # model = Linear()
+    model = CNNClassifier()
     model = model.cuda(0)
 
     criterion = nn.CrossEntropyLoss()
@@ -98,7 +98,7 @@ def classifier_training(train, test, new, real_ratio):
         accuracy = correct / len(mnist_test)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), f'checkpoints_linear_inverse/best_{real_ratio}.pt')
+            torch.save(model.state_dict(), 'checkpoints_cnn_' + dir + f'/best_{real_ratio}.pt')
             print(f'[Epoch : {epoch}/100] Best Accuracy : {accuracy:.6f}%')
 
 
@@ -153,7 +153,7 @@ def denormalize(images):
 """# Make Dataset"""
 
 
-def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_conf=None, real_ratio=1.0):
+def make_dataset(mode, images, labels, conf, fake_images=None, fake_labels=None, fake_conf=None, real_ratio=1.0):
     # Images: (60000, 28, 28)
     # labels: (60000, 1)
     # conf:   (60000, 1)
@@ -194,23 +194,31 @@ def make_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_
     new_confs = torch.cat((conf, fake_conf), dim=0)
     new_labels = new_labels.to(torch.int64)
 
-    """Mixing"""
-    # indices = torch.randperm(N)
-    # new_images = new_images[indices]
-    # new_labels = new_labels[indices]
-    # new_confs = new_confs[indices]
-
-    """Sort by confidence"""
-    # n = torch.argsort(-new_confs).to(device) # Descending order
-    n = torch.argsort(new_confs).to(device)    # Ascending order
-    new_images = new_images[n, :, :, :]
-    new_labels = new_labels[n]
+    if mode == 0:
+        """Mixing"""
+        indices = torch.randperm(N)
+        new_images = new_images[indices]
+        new_labels = new_labels[indices]
+    elif mode == 1:
+        """Inverse Sort by confidence"""
+        # n = torch.argsort(-new_confs).to(device) # Descending order
+        n = torch.argsort(new_confs).to(device)    # Ascending order
+        new_images = new_images[n, :, :, :]
+        new_labels = new_labels[n]
+    elif mode == 2:
+        """Sort by confidence"""
+        n = torch.argsort(-new_confs).to(device) # Descending order
+        # n = torch.argsort(new_confs).to(device)    # Ascending order
+        new_images = new_images[n, :, :, :]
+        new_labels = new_labels[n]
 
     dataset = NewSimpleDataset(new_images, new_labels)
     save_image(new_images[N // 2 - 20:N // 2, :, :, :],
                os.path.join("figure", "new_image_train_.png"))
     print(new_labels[N // 2 - 20:N // 2])
     return dataset
+
+
 
 
 def cat_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_conf=None, fake_ratio=1.0):
@@ -379,7 +387,7 @@ if __name__ == '__main__':
 
     # """Evaluation"""
 
-    ratio = [0.1, 0.5, 1.0]
+    ratio = [0.5, 1.0]
     # ratio = [1.0]
     # counts = torch.Tensor(10)
     # counts = counts.to(device)
@@ -411,13 +419,13 @@ if __name__ == '__main__':
     fake_images = denormalize(fake_images)
 
     """ Classifier """
-    classifier = Linear()
-    classifier.load_state_dict(torch.load(
-        'classifier/checkpoints/linear_best.pt'))
-
-    # classifier = CNNClassifier()
+    # classifier = Linear()
     # classifier.load_state_dict(torch.load(
-    #     'classifier/checkpoints/best.pt'))
+    #     'classifier/checkpoints/linear_best.pt'))
+
+    classifier = CNNClassifier()
+    classifier.load_state_dict(torch.load(
+        'classifier/checkpoints/best.pt'))
 
     images_for_dataset = tf.Resize(32)(mnist_train.data)
     images_for_dataset = torch.div(images_for_dataset, 255)
@@ -455,7 +463,7 @@ if __name__ == '__main__':
     print("fake confidence score: ", torch.mean(torch.max(fake_conf, dim=1).values))
 
     for real_ratio in ratio:
-        dataset = make_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+        dataset = make_dataset(1, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
                                fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
         # fake_ratio = 0.5
         # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
@@ -470,4 +478,25 @@ if __name__ == '__main__':
                                       drop_last=True
                                       )
         """Training Classifier """
-        classifier_training(mnist_train, mnist_test, dataset, real_ratio)
+        classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'inverse')
+
+    ratio = [0.1, 0.5, 1.0]
+    for real_ratio in ratio:
+        dataset = make_dataset(0, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+                               fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
+        # fake_ratio = 0.5
+        # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+        #                        fake_labels, torch.max(fake_conf, dim=1).values, fake_ratio)
+
+        newimages = dataset.images
+        aa = torch.max(mnist_test.data[0])
+        bb = torch.max(newimages[0])
+        new_train_loader = DataLoader(dataset=dataset,
+                                      batch_size=8,
+                                      shuffle=False,
+                                      drop_last=True
+                                      )
+        """Training Classifier """
+        classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'mixed')
+
+
