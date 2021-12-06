@@ -98,7 +98,7 @@ def classifier_training(train, test, new, real_ratio, dir):
         accuracy = correct / len(mnist_test)
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            torch.save(model.state_dict(), 'checkpoints_cnn_' + dir + f'/best_{real_ratio}.pt')
+            torch.save(model.state_dict(), 'checkpoints_cnn_cat_' + dir + f'/best_{real_ratio}.pt')
             print(f'[Epoch : {epoch}/100] Best Accuracy : {accuracy:.6f}%')
 
 
@@ -221,7 +221,7 @@ def make_dataset(mode, images, labels, conf, fake_images=None, fake_labels=None,
 
 
 
-def cat_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_conf=None, fake_ratio=1.0):
+def cat_dataset(mode, images, labels, conf, fake_images=None, fake_labels=None, fake_conf=None, fake_ratio=1.0):
     # Images: (60000, 28, 28)
     # labels: (60000, 1)
     # conf:   (60000, 1)
@@ -262,12 +262,32 @@ def cat_dataset(images, labels, conf, fake_images=None, fake_labels=None, fake_c
     new_images = torch.cat((image_data, fake_imageData), dim=0)
     new_labels = torch.cat((label_data, fake_labelData), dim=0)
     new_confs = torch.cat((conf, fake_conf), dim=0)
+    new_labels = new_labels.to(torch.int64)
 
     """Sort by confidence"""
-    n = torch.argsort(-new_confs).to(device)
-    new_images = new_images[n, :, :, :]
-    new_labels = new_labels[n]
-    new_labels = new_labels.to(torch.int64)
+    # n = torch.argsort(-new_confs).to(device)
+    # new_images = new_images[n, :, :, :]
+    # new_labels = new_labels[n]
+    # new_labels = new_labels.to(torch.int64)
+
+    if mode == 0:
+        """Mixing"""
+        indices = torch.randperm(N)
+        new_images = new_images[indices]
+        new_labels = new_labels[indices]
+    elif mode == 1:
+        """Inverse Sort by confidence"""
+        # n = torch.argsort(-new_confs).to(device) # Descending order
+        n = torch.argsort(new_confs).to(device)    # Ascending order
+        new_images = new_images[n, :, :, :]
+        new_labels = new_labels[n]
+    elif mode == 2:
+        """Sort by confidence"""
+        n = torch.argsort(-new_confs).to(device) # Descending order
+        # n = torch.argsort(new_confs).to(device)    # Ascending order
+        new_images = new_images[n, :, :, :]
+        new_labels = new_labels[n]
+
 
     dataset = NewSimpleDataset(new_images, new_labels)
     save_image(new_images[N // 2 - 20:N // 2, :, :, :],
@@ -461,10 +481,33 @@ if __name__ == '__main__':
     # real_ratio = 1.0
     print("confidence score: ", torch.mean(torch.max(conf, dim=1).values))
     print("fake confidence score: ", torch.mean(torch.max(fake_conf, dim=1).values))
+    # ratio = [0.1]
+    # for real_ratio in ratio:
+    #     dataset = make_dataset(1, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+    #                            fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
+    #     # fake_ratio = 0.5
+    #     # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+    #     #                        fake_labels, torch.max(fake_conf, dim=1).values, fake_ratio)
+    #
+    #     newimages = dataset.images
+    #     aa = torch.max(mnist_test.data[0])
+    #     bb = torch.max(newimages[0])
+    #     new_train_loader = DataLoader(dataset=dataset,
+    #                                   batch_size=8,
+    #                                   shuffle=False,
+    #                                   drop_last=True
+    #                                   )
+    #     """Training Classifier """
+    #     print(f"Start training {real_ratio} - inverse")
+    #     classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'inverse')
 
-    for real_ratio in ratio:
-        dataset = make_dataset(1, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
-                               fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
+    # ratio = [0.1, 0.5, 1.0]
+    mode_name = ['mixed', 'inverse', 'sorted', 'not_sorted']
+    for mode in range(4):
+        if mode == 0:
+            continue
+        dataset = cat_dataset(mode, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+                               fake_labels, torch.max(fake_conf, dim=1).values, 0.5)
         # fake_ratio = 0.5
         # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
         #                        fake_labels, torch.max(fake_conf, dim=1).values, fake_ratio)
@@ -478,25 +521,5 @@ if __name__ == '__main__':
                                       drop_last=True
                                       )
         """Training Classifier """
-        classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'inverse')
-
-    ratio = [0.1, 0.5, 1.0]
-    for real_ratio in ratio:
-        dataset = make_dataset(0, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
-                               fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
-        # fake_ratio = 0.5
-        # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
-        #                        fake_labels, torch.max(fake_conf, dim=1).values, fake_ratio)
-
-        newimages = dataset.images
-        aa = torch.max(mnist_test.data[0])
-        bb = torch.max(newimages[0])
-        new_train_loader = DataLoader(dataset=dataset,
-                                      batch_size=8,
-                                      shuffle=False,
-                                      drop_last=True
-                                      )
-        """Training Classifier """
-        classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'mixed')
-
-
+        print(f"Start training {0.5} - {mode_name[mode]}")
+        classifier_training(mnist_train, mnist_test, dataset, 0.5, mode_name[mode])
