@@ -16,6 +16,8 @@ import torch.nn as nn
 import yaml
 from torchvision.utils import save_image
 import torchvision.datasets
+import matplotlib.pyplot as plt
+
 from torchvision import transforms as tf
 
 from dataset import NewSimpleDataset
@@ -211,6 +213,28 @@ def make_dataset(mode, images, labels, conf, fake_images=None, fake_labels=None,
         # n = torch.argsort(new_confs).to(device)    # Ascending order
         new_images = new_images[n, :, :, :]
         new_labels = new_labels[n]
+        # _, front_counts = torch.unique(new_labels[:10000], sorted=True, return_counts=True)
+        # _, back_counts = torch.unique(new_labels[50000:], sorted=True, return_counts=True)
+        #
+        # x1 = np.linspace(0, 9, 10)
+        # x1 = x1.astype(int)
+        # plt.subplot(1, 2, 1)  # nrows=2, ncols=1, index=1
+        # # front_counts.cpu()
+        # plt.bar(x1, front_counts.cpu())
+        # plt.title('Front 10000 labels')
+        # plt.ylabel('Number of images')
+        # plt.xticks(x1, x1)
+        #
+        # # back_counts.cpu()
+        # plt.subplot(1, 2, 2)  # nrows=2, ncols=1, index=1
+        # plt.bar(x1, back_counts.cpu())
+        # plt.title('Back 10000 labels')
+        # plt.xlabel('Number')
+        # plt.ylabel('Number of images')
+        # plt.xticks(x1, x1)
+        #
+        # plt.tight_layout()
+        # plt.savefig('figure/confidence_distribution.png')
 
     dataset = NewSimpleDataset(new_images, new_labels)
     save_image(new_images[N // 2 - 20:N // 2, :, :, :],
@@ -371,6 +395,7 @@ logging.basicConfig(
 )
 
 if __name__ == '__main__':
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
     set_seed(42)
     device = torch.device('cpu')
     if torch.cuda.is_available():
@@ -407,21 +432,41 @@ if __name__ == '__main__':
 
     # """Evaluation"""
 
-    ratio = [0.5, 1.0]
-    # ratio = [1.0]
-    # counts = torch.Tensor(10)
-    # counts = counts.to(device)
-    # predicted_counts = torch.Tensor(10)
-    # predicted_counts = predicted_counts.to(device)
-    # for r in ratio:
-    #     model = Linear()
-    #     model.load_state_dict(torch.load(
-    #         f'checkpoints_linear_mixed/best_{r}.pt'))
-    #     temp_counts, temp_predicted = testing(model, mnist_test, r)
-    #     counts += temp_counts
-    #     predicted_counts += temp_predicted
-    # print("Total Fail_example_counts :\n", counts)
-    # print("Total Fail_example_predicted_counts :\n", predicted_counts)
+    # ratio = [0.5]
+    ratio = [1.0]
+    counts = torch.Tensor(10)
+    counts = counts.to(device)
+    predicted_counts = torch.Tensor(10)
+    predicted_counts = predicted_counts.to(device)
+    _, num_labels = torch.unique(mnist_test.targets, sorted=True, return_counts=True)
+    num_labels = num_labels.to(device)
+    for r in ratio:
+        model = CNNClassifier()
+        model.load_state_dict(torch.load(
+            f'checkpoints_cnn_mixed/best_{r}.pt'))
+        temp_counts, temp_predicted = testing(model, mnist_test, r)
+        counts += torch.div(temp_counts, num_labels)
+        predicted_counts += torch.div(temp_predicted, num_labels)
+
+    x1 = np.linspace(0, 9, 10)
+    x1 = x1.astype(int)
+    plt.subplot(1, 2, 1)  # nrows=2, ncols=1, index=1
+    plt.bar(x1, counts.cpu())
+    plt.title('Missed labels')
+    plt.ylabel('Ratio')
+    plt.xticks(x1, x1)
+
+    plt.subplot(1, 2, 2)  # nrows=2, ncols=1, index=1
+    plt.bar(x1, predicted_counts.cpu())
+    plt.title('Predicted labels')
+    plt.xlabel('Number')
+    plt.ylabel('Ratio')
+    plt.xticks(x1, x1)
+
+    plt.tight_layout()
+    plt.savefig('figure/cnn_fail_label_count.png')
+    print("Total Fail_example_counts :\n", counts)
+    print("Total Fail_example_predicted_counts :\n", predicted_counts)
 
     """Generate images"""
     myaml = yaml.load(open('config/model.yaml', 'r'), Loader=yaml.FullLoader)
@@ -479,32 +524,67 @@ if __name__ == '__main__':
     # print(hello[zero_indices])
     # print(torch.max(hello[hard_index]), torch.min(hello[hard_index]), torch.mean(hello[hard_index], dim=0))
     # real_ratio = 1.0
+
+    """ Save Conf"""
+    # fake_max_conf = torch.max(fake_conf, dim=1).values
+    # max_conf = torch.max(conf, dim=1).values
+    # conf_val = torch.Tensor(10)
+    # fake_conf_val = torch.Tensor(10)
+    #
+    # for i in range(10):
+    #     fake_temp_idx = fake_labels == i
+    #     new_label = torch.Tensor(labels)
+    #     temp_idx = new_label == i
+    #     temp_idx = temp_idx.to(device)
+    #     fake_temp_idx = fake_temp_idx.to(device)
+    #     temp_conf_i = torch.masked_select(max_conf, temp_idx)
+    #     fake_temp_conf_i = torch.masked_select(fake_max_conf, fake_temp_idx)
+    #     conf_val[i] = torch.mean(temp_conf_i)
+    #     fake_conf_val[i] = torch.mean(fake_temp_conf_i)
+    #
+    # x1 = np.linspace(0, 9, 10)
+    # x1 = x1.astype(int)
+    # plt.subplot(1, 2, 1)  # nrows=2, ncols=1, index=1
+    # plt.bar(x1, conf_val)
+    # plt.title('Real images')
+    # plt.ylabel('Confidence score')
+    # plt.xticks(x1, x1)
+    #
+    # plt.subplot(1, 2, 2)  # nrows=2, ncols=1, index=1
+    # plt.bar(x1, fake_conf_val)
+    # plt.title('Fake images')
+    # plt.xlabel('Number')
+    # plt.ylabel('Confidence score')
+    # plt.xticks(x1, x1)
+    #
+    # plt.tight_layout()
+    # plt.savefig('figure/confidence_per_number.png')
+
     print("confidence score: ", torch.mean(torch.max(conf, dim=1).values))
     print("fake confidence score: ", torch.mean(torch.max(fake_conf, dim=1).values))
-    # ratio = [0.1]
-    # for real_ratio in ratio:
-    #     dataset = make_dataset(1, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
-    #                            fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
-    #     # fake_ratio = 0.5
-    #     # dataset = cat_dataset(images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
-    #     #                        fake_labels, torch.max(fake_conf, dim=1).values, fake_ratio)
+    # real_ratio = 0.1
+    # dataset = make_dataset(2, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
+    #                        fake_labels, torch.max(fake_conf, dim=1).values, real_ratio)
     #
-    #     newimages = dataset.images
-    #     aa = torch.max(mnist_test.data[0])
-    #     bb = torch.max(newimages[0])
-    #     new_train_loader = DataLoader(dataset=dataset,
-    #                                   batch_size=8,
-    #                                   shuffle=False,
-    #                                   drop_last=True
-    #                                   )
-    #     """Training Classifier """
-    #     print(f"Start training {real_ratio} - inverse")
-    #     classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'inverse')
+    # newimages = dataset.images
+    # aa = torch.max(mnist_test.data[0])
+    # bb = torch.max(newimages[0])
+    # new_train_loader = DataLoader(dataset=dataset,
+    #                               batch_size=8,
+    #                               shuffle=False,
+    #                               drop_last=True
+    #                               )
+    # """Training Classifier """
+    # print(f"Start training {real_ratio}")
+    # classifier_training(mnist_train, mnist_test, dataset, real_ratio, 'sorted')
 
+    # =====================================================================================
     # ratio = [0.1, 0.5, 1.0]
     mode_name = ['mixed', 'inverse', 'sorted', 'not_sorted']
     for mode in range(4):
         if mode == 0:
+            continue
+        elif mode == 1:
             continue
         dataset = cat_dataset(mode, images_for_dataset, mnist_train.targets, torch.max(conf, dim=1).values, fake_images,
                                fake_labels, torch.max(fake_conf, dim=1).values, 0.5)
