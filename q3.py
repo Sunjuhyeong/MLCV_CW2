@@ -196,6 +196,15 @@ def make_dataset(mode, images, labels, conf, fake_images=None, fake_labels=None,
     new_confs = torch.cat((conf, fake_conf), dim=0)
     new_labels = new_labels.to(torch.int64)
 
+    # new = torch.Tensor()
+    # new_l = torch.Tensor()
+    # for i in range(10):
+    #     new_label_idx = new_labels == i
+    #     new = torch.cat([new, torch.masked_select(new_images, new_label_idx)], dim=)
+    #     new_l = torch.cat([new_l, torch.masked_select(new_labels, new_label_idx)], dim=1)
+    #
+
+
     if mode == 0:
         """Mixing"""
         indices = torch.randperm(N)
