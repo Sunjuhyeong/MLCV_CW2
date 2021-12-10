@@ -432,8 +432,8 @@ if __name__ == '__main__':
 
     # """Evaluation"""
 
-    # ratio = [0.5]
-    ratio = [1.0]
+    ratio = [0.5]
+    # ratio = [1.0]
     counts = torch.Tensor(10)
     counts = counts.to(device)
     predicted_counts = torch.Tensor(10)
@@ -443,7 +443,7 @@ if __name__ == '__main__':
     for r in ratio:
         model = CNNClassifier()
         model.load_state_dict(torch.load(
-            f'checkpoints_cnn_mixed/best_{r}.pt'))
+            f'checkpoints_cnn_sorted/best_{r}.pt'))
         temp_counts, temp_predicted = testing(model, mnist_test, r)
         counts += torch.div(temp_counts, num_labels)
         predicted_counts += torch.div(temp_predicted, num_labels)
